@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
 import sys
+import os
+from datetime import datetime
+from pathlib import Path
 
 selected_y = None
 window_closed = False
@@ -183,9 +186,32 @@ def create_interactive_lake_reflection(
 
 
 if __name__ == "__main__":
+    # ── Folder setup ─────────────────────────────────────────────────────────
+    IMAGES_DIR  = Path("images")
+    RESULTS_DIR = Path("results")
+    RESULTS_DIR.mkdir(exist_ok=True)
+
+    # ── Pick an image: pass filename as CLI arg, or set a default ────────────
+    # Usage:  python perspective.py ferrari.jpg
+    #         python perspective.py skyline.jpg
+    if len(sys.argv) > 1:
+        image_path = IMAGES_DIR / sys.argv[1]
+    else:
+        image_path = IMAGES_DIR / "ferrari.jpg"   # ← change default here
+
+    if not image_path.exists():
+        print(f"Image not found: {image_path}")
+        print(f"Put your images in the '{IMAGES_DIR}/' folder.")
+        sys.exit(1)
+
+    # ── Auto-generate output name: <stem>_reflection_<YYYYMMDD_HHMMSS>.jpg ──
+    stem        = image_path.stem
+    timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = RESULTS_DIR / f"{stem}_reflection_{timestamp}.jpg"
+
     create_interactive_lake_reflection(
-        image_path="ferrari.jpg",
-        output_path="ferrari_interactive_reflection1.jpg",
+        image_path=str(image_path),
+        output_path=str(output_path),
         perspective_shrink=0.12,
         vertical_compression=0.82,
         wave_amp=5,
