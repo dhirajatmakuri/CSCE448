@@ -5,15 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 selected_y = None
-window_closed = False
 
 """
-Function: To allow the user to interactively select the waterline for the reflection effect.
-- Displays the image in a resizable window
-- Sets waterline by clicking on image
-
-Parameters:
-- image: Input image to add water reflection to
+Function: Interactive interface to allow user to select waterline on image input for reflection effect
+- Why: To allow user to set desired waterline for reflection effect
 """
 def pick_reflection_line(image):
     global selected_y, window_closed
@@ -102,13 +97,104 @@ def pick_reflection_line(image):
     return real_y
 
 """
-Function: Creating interactive lake reflection effect
-- User clicks to set waterline
-- Applies perspective warp, ripple distortion, blur, and darkening to create a realistic reflection
-- Blends the reflection with the original image and saves the result
+PROCESSING STEPS TO CREATE TRUE WATER REFLECTION EFFECT:
+1. Vertical Compression: To simulate depth and perspective by making reflection look shorter
+2. Perspective Warp: To create a more realistic reflection by simulating how it would narrow towards the bottom
+3. Ripple Distortion: To simulate the natural ripples and waves on a water surface, adding realism to the reflection
+4. Blur: To soften the reflection and enhance realism of water reflection
+5. Darkening and Vertical Fading: To simulate depth and light attenuation
+6. Composite: To seamlessly combine the original image with the processed reflection, creating a cohesive final image
+"""
+
+"""
+Function: Apply vertical compression to reflected image
+- Why: To simulate depth and perspective by making reflection look shorter
+"""
+def apply_vertical_compression(reflected, w, vertical_compression):
+    src_h = reflected.shape[0]
+    compressed_h = max(1, int(src_h * vertical_compression))
+    reflected = cv2.resize(reflected, (w, compressed_h), interpolation=cv2.INTER_LINEAR)
+    return reflected, compressed_h
+
+"""
+Function: Apply perspective warp to reflected image
+- Why: To create a more realistic reflection by simulating how it would narrow towards the bottom
+"""
+def apply_perspective_warp(reflected, w, compressed_h, perspective_shrink):
+    inset = int(w * perspective_shrink / 2)
+    src = np.float32([[0, 0], [w-1, 0], [0, compressed_h-1], [w-1, compressed_h-1]])
+    dst = np.float32([[0, 0], [w-1, 0], [inset, compressed_h-1], [w-1-inset, compressed_h-1]])
+    M = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(reflected, M, (w, compressed_h),
+                               flags=cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_REFLECT)
+
+"""
+Function: Apply ripple distortion to reflected image
+- Why: To simulate the natural ripples and waves on a water surface, adding realism to the reflection
+"""
+def apply_ripple(reflected, w, compressed_h, wave_amp, wave_freq):
+    ys = np.arange(compressed_h, dtype=np.float32)
+    local_amp = wave_amp * (0.25 + 0.75 * (ys / max(compressed_h - 1, 1)))
+    shifts = (local_amp * np.sin(2 * np.pi * wave_freq * ys)).reshape(-1, 1)
+    xs = np.tile(np.arange(w, dtype=np.float32), (compressed_h, 1))
+    map_x = np.clip(xs + shifts, 0, w - 1)
+    map_y = np.tile(ys.reshape(-1, 1), (1, w))
+    return cv2.remap(reflected, map_x, map_y,
+                     interpolation=cv2.INTER_LINEAR,
+                     borderMode=cv2.BORDER_REFLECT)
+
+"""
+Function: Applying Gaussian blur to reflected image
+- Why: To soften the reflection and enhance realism of water reflection
+"""
+def apply_blur(reflected, blur_size):
+    if blur_size % 2 == 0:
+        blur_size += 1
+    return cv2.GaussianBlur(reflected, (blur_size, blur_size), 0)
+
+"""
+Function: Apply darkening and vertical fading to reflected image
+- Why: To simulate depth and light attenuation
+- Darkening makes the reflection look more natural and less vibrant than the original object
+- Vertical fading creates a gradient effect that mimics how reflections typically fade out with distance on water
+"""
+def apply_fade(reflected, compressed_h, darken, fade_min):
+    reflected = np.clip(reflected.astype(np.float32) * darken, 0, 255)
+    fade = np.linspace(1.0, fade_min, compressed_h).reshape(compressed_h, 1, 1)
+    return np.clip(reflected * fade, 0, 255).astype(np.uint8)
+
+"""
+Function: Compile original and reflected image into one final image with waterline blending
+- Why: To seamlessly combine the original image with the processed reflection, creating a cohesive final image
+- Waterline blending is used to hide the seam between original and reflected
+"""
+def composite(img, reflected, reflection_start_y, compressed_h, w):
+    final_h = reflection_start_y + compressed_h
+    output = np.zeros((final_h, w, 3), dtype=np.uint8)
+    output[:reflection_start_y] = img[:reflection_start_y]
+    output[reflection_start_y:reflection_start_y + compressed_h] = reflected
+
+    #Waterline blending to hide seam between original and reflection
+    blend_height = 8
+    for i in range(min(blend_height, compressed_h)):
+        alpha = i / blend_height
+        row = reflection_start_y + i
+        if row < final_h and (reflection_start_y - 1) >= 0:
+            output[row] = np.clip(
+                (1 - alpha) * img[reflection_start_y - 1].astype(np.float32) +
+                alpha        * reflected[i].astype(np.float32),
+                0, 255
+            ).astype(np.uint8)
+    return output
+
+
+"""
+Function: Main function to create interactive lake reflection effect on an image
+- Combined all steps to produce final result
 
 Parameters:
-- perspective_shrink: Hhow much the reflection narrows towards the bottom to enhance perspective
+- perspective_shrink: How much the reflection narrows towards the bottom to enhance perspective
 - vertical_compression: Compresses the reflection vertically to simulate depth and prevent it from looking too tall
 - wave_amp: Amplitude of the ripple distortion
 - wave_freq: Frequency of the ripple distortion
@@ -129,82 +215,40 @@ def create_interactive_lake_reflection(
     fade_min=0.12,
     jpeg_quality=95
 ):
+    
+    #Load image and validate
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Could not load image: {image_path}")
 
+    #Get image dimensions
     h, w = img.shape[:2]
 
+    #Get reflection line from user input via interactive interface
     reflection_start_y = pick_reflection_line(img)
     reflection_start_y = max(1, min(reflection_start_y, h - 1))
 
-    top_part      = img[:reflection_start_y, :, :]
+    #Extract region above waterline and reflect vertically to create base reflection
     source_region = img[:reflection_start_y, :, :]
-    reflected     = cv2.flip(source_region, 0)
+    reflected = cv2.flip(source_region, 0)
 
-    src_h = reflected.shape[0]
-    if src_h == 0:
+    #Check for valid waterline to ensure enough processing space
+    if reflected.shape[0] == 0:
         raise ValueError("Reflection line is too close to the top of the image.")
 
-    #Applied vertical compression to enhance perspective effect
-    compressed_h = max(1, int(src_h * vertical_compression))
-    reflected = cv2.resize(reflected, (w, compressed_h), interpolation=cv2.INTER_LINEAR)
+    #Apply processing steps to reflected image via parameters to create realistic water reflection effect
+    reflected, compressed_h = apply_vertical_compression(reflected, w, vertical_compression)
+    reflected = apply_perspective_warp(reflected, w, compressed_h, perspective_shrink)
+    reflected = apply_ripple(reflected, w, compressed_h, wave_amp, wave_freq)
+    reflected = apply_blur(reflected, blur_size)
+    reflected = apply_fade(reflected, compressed_h, darken, fade_min)
 
-    #Applied perspective warp to create a more realistic reflection
-    inset = int(w * perspective_shrink / 2)
-    src = np.float32([[0, 0], [w-1, 0], [0, compressed_h-1], [w-1, compressed_h-1]])
-    dst = np.float32([[0, 0], [w-1, 0], [inset, compressed_h-1], [w-1-inset, compressed_h-1]])
-    M = cv2.getPerspectiveTransform(src, dst)
-    reflected = cv2.warpPerspective(reflected, M, (w, compressed_h),
-                                    flags=cv2.INTER_LINEAR,
-                                    borderMode=cv2.BORDER_REFLECT)
+    #Create final composite image
+    output    = composite(img, reflected, reflection_start_y, compressed_h, w)
 
-    #Vectorized ripple distortion to simulate water surface
-    ys = np.arange(compressed_h, dtype=np.float32)
-    local_amp = wave_amp * (0.25 + 0.75 * (ys / max(compressed_h - 1, 1)))
-    shifts    = (local_amp * np.sin(2 * np.pi * wave_freq * ys)).reshape(-1, 1)
-
-    xs = np.tile(np.arange(w, dtype=np.float32), (compressed_h, 1))
-    map_x = np.clip(xs + shifts, 0, w - 1)
-    map_y = np.tile(ys.reshape(-1, 1), (1, w))
-
-    reflected = cv2.remap(reflected, map_x, map_y,
-                          interpolation=cv2.INTER_LINEAR,
-                          borderMode=cv2.BORDER_REFLECT)
-
-    #Applying blur to soften the reflection for realism
-    if blur_size % 2 == 0:
-        blur_size += 1
-    reflected = cv2.GaussianBlur(reflected, (blur_size, blur_size), 0)
-
-    #Darkening + vertical fade for depth effect
-    reflected = np.clip(reflected.astype(np.float32) * darken, 0, 255)
-    fade = np.linspace(1.0, fade_min, compressed_h).reshape(compressed_h, 1, 1)
-    reflected = np.clip(reflected * fade, 0, 255).astype(np.uint8)
-
-    #Compile original and water-reflected parts as one
-    final_h = reflection_start_y + compressed_h
-    output  = np.zeros((final_h, w, 3), dtype=np.uint8)
-    output[:reflection_start_y] = top_part
-    output[reflection_start_y:reflection_start_y + compressed_h] = reflected
-
-    #Waterline blending to hide seam between original and reflection
-    blend_height = 8
-    for i in range(min(blend_height, compressed_h)):
-        alpha = i / blend_height
-        row   = reflection_start_y + i
-        if row < final_h and (reflection_start_y - 1) >= 0:
-            output[row] = np.clip(
-                (1 - alpha) * img[reflection_start_y - 1].astype(np.float32) +
-                alpha        * reflected[i].astype(np.float32),
-                0, 255
-            ).astype(np.uint8)
-
-    #Subtle horizontal line at waterline for added definition
-    cv2.line(output, (0, reflection_start_y), (w, reflection_start_y), (35, 35, 35), 1)
-
+    #Write final result to a result directory
     cv2.imwrite(output_path, output, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-    print(f"Saved → {output_path}")
+    print(f"Saved to {output_path}")
 
 """
 MAIN:
@@ -224,7 +268,7 @@ if __name__ == "__main__":
     image_input = input("Enter the name of your image (without extension): ").strip()
 
     #Check for valid input
-    #Default to ferrarri.jpg if no input was provided
+    #Default to ferrari.jpg if no input was provided
     if image_input == "":
         image_path = IMAGES_DIR / "ferrari.jpg"
     else:
