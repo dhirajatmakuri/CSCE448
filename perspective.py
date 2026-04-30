@@ -37,40 +37,76 @@ def pick_reflection_line(image):
 
     cv2.setMouseCallback(WIN, mouse_callback)
 
-    #Color palette and UI constants
-    GREEN   = (72, 199, 142)
-    YELLOW  = (55, 210, 255)
-    SHADOW  = (0, 0, 0)
-    PANEL_H = 48
+    #Color palette — matches Phase 2 UI
+    ACCENT  = ( 55, 180, 255)  # cyan
+    GREEN   = ( 80, 200, 120)
+    SUB     = (110, 110, 110)
+    WHITE   = (255, 255, 255)
+    BG      = ( 20,  20,  20)
+    PANEL_H = 52
 
     while True:
-        frame = display.copy()
+        # Build canvas: dark background with image composited on top
+        try:
+            wr    = cv2.getWindowImageRect(WIN)
+            cur_w = max(wr[2], disp_w)
+            cur_h = max(wr[3], disp_h)
+        except Exception:
+            cur_w, cur_h = disp_w, disp_h
 
-        # Semi-transparent top panel
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (disp_w, PANEL_H), (18, 18, 18), -1)
-        cv2.addWeighted(overlay, 0.72, frame, 0.28, 0, frame)
+        canvas = np.full((cur_h, cur_w, 3), BG, dtype=np.uint8)
 
+        # Centre image on canvas
+        img_w = min(disp_w, cur_w)
+        img_h = min(disp_h, cur_h - PANEL_H)
+        if img_h > 0 and img_w > 0:
+            # Scale to fit available space below panel
+            fs  = min(cur_w / disp_w, (cur_h - PANEL_H) / disp_h)
+            sw  = max(1, int(disp_w * fs))
+            sh  = max(1, int(disp_h * fs))
+            img_scaled = cv2.resize(display, (sw, sh), interpolation=cv2.INTER_LINEAR)
+            ox = (cur_w - sw) // 2
+            oy = PANEL_H + (cur_h - PANEL_H - sh) // 2
+            canvas[oy:oy + sh, ox:ox + sw] = img_scaled
+
+            if selected_y is not None:
+                # Map display-space selected_y into canvas space
+                canvas_y = oy + int(selected_y * fs)
+                if 0 <= canvas_y < cur_h:
+                    # Full-width guide line
+                    cv2.line(canvas, (0, canvas_y), (cur_w, canvas_y), ACCENT, 1, cv2.LINE_AA)
+                    # Tick marks every 80px
+                    for x in range(0, cur_w, 80):
+                        cv2.line(canvas, (x, canvas_y - 5), (x, canvas_y + 5), ACCENT, 1, cv2.LINE_AA)
+
+        # Header panel — solid dark bar at top
+        cv2.rectangle(canvas, (0, 0), (cur_w, PANEL_H), (30, 30, 30), -1)
+        cv2.line(canvas, (0, PANEL_H), (cur_w, PANEL_H), (50, 50, 50), 1)
+
+        # Step label
+        cv2.putText(canvas, "Step 1", (16, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, SUB, 1, cv2.LINE_AA)
+        cv2.putText(canvas, "Set Waterline", (16, 40),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.55, WHITE, 1, cv2.LINE_AA)
+
+        # Right side of header: status or hint
         if selected_y is not None:
-            # Horizontal guide line (display coords)
-            cv2.line(frame, (0, selected_y), (disp_w, selected_y), GREEN, 2, cv2.LINE_AA)
-
-            # Tick marks every 80 px
-            for x in range(0, disp_w, 80):
-                cv2.line(frame, (x, selected_y - 5), (x, selected_y + 5), GREEN, 1, cv2.LINE_AA)
-
-            # Label
-            real_y = int(selected_y / scale)          # Map back to original coords
-            label = f"  Waterline  y={real_y}px  |  ENTER to confirm  |  ESC to cancel"
-            # Shadow
-            cv2.putText(frame, label, (11, 31), cv2.FONT_HERSHEY_DUPLEX, 0.6, SHADOW, 3, cv2.LINE_AA)
-            cv2.putText(frame, label, (10, 30), cv2.FONT_HERSHEY_DUPLEX, 0.6, GREEN,  1, cv2.LINE_AA)
+            real_y = int(selected_y / scale)
+            status = f"y = {real_y}px"
+            (tw, _), _ = cv2.getTextSize(status, cv2.FONT_HERSHEY_DUPLEX, 0.55, 1)
+            cv2.putText(canvas, status, (cur_w - tw - 16, 40),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.55, ACCENT, 1, cv2.LINE_AA)
+            hint = "ENTER confirm   ESC cancel"
+            (hw, _), _ = cv2.getTextSize(hint, cv2.FONT_HERSHEY_SIMPLEX, 0.37, 1)
+            cv2.putText(canvas, hint, (cur_w - hw - 16, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.37, GREEN, 1, cv2.LINE_AA)
         else:
-            hint = "  Click anywhere to set the waterline"
-            cv2.putText(frame, hint, (11, 31), cv2.FONT_HERSHEY_DUPLEX, 0.6, SHADOW,  3, cv2.LINE_AA)
-            cv2.putText(frame, hint, (10, 30), cv2.FONT_HERSHEY_DUPLEX, 0.6, YELLOW,  1, cv2.LINE_AA)
+            hint = "Click to set waterline   ESC cancel"
+            (hw, _), _ = cv2.getTextSize(hint, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1)
+            cv2.putText(canvas, hint, (cur_w - hw - 16, 34),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, SUB, 1, cv2.LINE_AA)
 
-        cv2.imshow(WIN, frame)
+        cv2.imshow(WIN, canvas)
         key = cv2.waitKey(20) & 0xFF
 
         # X button: getWindowProperty returns -1 when window is gone
