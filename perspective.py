@@ -4,9 +4,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+#Initialize global variable for selected waterline
 selected_y = None
 
-PREVIEW_W = 600  # Max width for live trackbar preview downscaling
+#Max width for live trackbar preview downscaling
+PREVIEW_W = 600
 
 """
 Function: Interactive interface to allow user to select waterline on image input for reflection effect
@@ -25,7 +27,7 @@ def pick_reflection_line(image):
     disp_h = int(h * scale)
     display = cv2.resize(image, (disp_w, disp_h), interpolation=cv2.INTER_AREA)
 
-    WIN = "Step 1 — Click waterline, press ENTER to confirm"
+    WIN = "Step 1 - Click waterline, press ENTER to confirm"
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WIN, disp_w, disp_h)
 
@@ -37,8 +39,8 @@ def pick_reflection_line(image):
 
     cv2.setMouseCallback(WIN, mouse_callback)
 
-    #Color palette — matches Phase 2 UI
-    ACCENT  = ( 55, 180, 255)  # cyan
+    #Color palette - matches Phase 2 UI
+    ACCENT  = ( 55, 180, 255) #Cyan for guide line
     GREEN   = ( 80, 200, 120)
     SUB     = (110, 110, 110)
     WHITE   = (255, 255, 255)
@@ -46,7 +48,7 @@ def pick_reflection_line(image):
     PANEL_H = 52
 
     while True:
-        # Build canvas: dark background with image composited on top
+        #Build canvas: Dark background with image composited on top
         try:
             wr    = cv2.getWindowImageRect(WIN)
             cur_w = max(wr[2], disp_w)
@@ -56,11 +58,11 @@ def pick_reflection_line(image):
 
         canvas = np.full((cur_h, cur_w, 3), BG, dtype=np.uint8)
 
-        # Centre image on canvas
+        #Center image on canvas
         img_w = min(disp_w, cur_w)
         img_h = min(disp_h, cur_h - PANEL_H)
         if img_h > 0 and img_w > 0:
-            # Scale to fit available space below panel
+            #Scale to fit available space below panel
             fs  = min(cur_w / disp_w, (cur_h - PANEL_H) / disp_h)
             sw  = max(1, int(disp_w * fs))
             sh  = max(1, int(disp_h * fs))
@@ -70,26 +72,26 @@ def pick_reflection_line(image):
             canvas[oy:oy + sh, ox:ox + sw] = img_scaled
 
             if selected_y is not None:
-                # Map display-space selected_y into canvas space
+                #Map display-space selected_y into canvas space
                 canvas_y = oy + int(selected_y * fs)
                 if 0 <= canvas_y < cur_h:
-                    # Full-width guide line
+                    #Full-width guide line
                     cv2.line(canvas, (0, canvas_y), (cur_w, canvas_y), ACCENT, 1, cv2.LINE_AA)
-                    # Tick marks every 80px
+                    #Tick marks every 80px
                     for x in range(0, cur_w, 80):
                         cv2.line(canvas, (x, canvas_y - 5), (x, canvas_y + 5), ACCENT, 1, cv2.LINE_AA)
 
-        # Header panel — solid dark bar at top
+        #Header panel - solid dark bar at top
         cv2.rectangle(canvas, (0, 0), (cur_w, PANEL_H), (30, 30, 30), -1)
         cv2.line(canvas, (0, PANEL_H), (cur_w, PANEL_H), (50, 50, 50), 1)
 
-        # Step label
+        #Step label
         cv2.putText(canvas, "Step 1", (16, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, SUB, 1, cv2.LINE_AA)
         cv2.putText(canvas, "Set Waterline", (16, 40),
                     cv2.FONT_HERSHEY_DUPLEX, 0.55, WHITE, 1, cv2.LINE_AA)
 
-        # Right side of header: status or hint
+        #Right side of header: status or hint
         if selected_y is not None:
             real_y = int(selected_y / scale)
             status = f"y = {real_y}px"
@@ -109,7 +111,7 @@ def pick_reflection_line(image):
         cv2.imshow(WIN, canvas)
         key = cv2.waitKey(20) & 0xFF
 
-        # X button: getWindowProperty returns -1 when window is gone
+        #X button: getWindowProperty returns -1 when window is gone
         try:
             prop = cv2.getWindowProperty(WIN, cv2.WND_PROP_VISIBLE)
         except cv2.error:
@@ -117,10 +119,10 @@ def pick_reflection_line(image):
 
         if prop < 1: #Window closed with X-button
             cv2.destroyAllWindows()
-            print("Window closed — exiting.")
+            print("Window closed: Exiting.")
             sys.exit(0)
 
-        if key in (13, 10): # "ENTER" TO CONFIRM SELECTION
+        if key in (13, 10): #"ENTER" TO CONFIRM SELECTION
             if selected_y is not None:
                 break
         elif key == 27: #"ESC" TO EXIT INTERFACE
@@ -130,7 +132,7 @@ def pick_reflection_line(image):
 
     cv2.destroyAllWindows()
 
-    # Convert display-space y back to original image space
+    #Convert display-space y back to original image space
     real_y = int(selected_y / scale)
     return real_y
 
@@ -207,7 +209,7 @@ def apply_fade(reflected, compressed_h, darken, fade_min):
 Function: Compile original and reflected image into one final image with waterline blending
 - Why: To seamlessly combine the original image with the processed reflection, creating a cohesive final image
 - Waterline blending is used to hide the seam between original and reflected
-- Vectorised alpha blend across the blend band replaces the old per-row Python loop for efficiency
+- Vectorized alpha blend across the blend band replaces the old per-row Python loop for efficiency
 """
 def composite(img, reflected, reflection_start_y, compressed_h, w):
     final_h = reflection_start_y + compressed_h
@@ -215,7 +217,7 @@ def composite(img, reflected, reflection_start_y, compressed_h, w):
     output[:reflection_start_y] = img[:reflection_start_y]
     output[reflection_start_y:reflection_start_y + compressed_h] = reflected
 
-    #Vectorised waterline blending to hide seam between original and reflection
+    #Vectorized waterline blending to hide seam between original and reflection
     blend_height = min(8, compressed_h)
     if reflection_start_y > 0 and blend_height > 0:
         alphas    = np.linspace(0, 1, blend_height).reshape(-1, 1, 1).astype(np.float32)
@@ -229,7 +231,7 @@ def composite(img, reflected, reflection_start_y, compressed_h, w):
 
 
 """
-Function: Internal helper — runs the processing pipeline on the downscaled preview image
+Function: Internal helper - runs the processing pipeline on the downscaled preview image
 - Why: Keeps the live trackbar preview fast by operating on a small image instead of full resolution
 - Uses dirty-flag caching so only pipeline stages whose inputs changed are recomputed:
     compress/warp -> ripple -> blur -> fade
@@ -241,7 +243,7 @@ Function: Internal helper — runs the processing pipeline on the downscaled pre
 def _build_preview(params, base_flipped, prev_w, prev_img, prev_y, cache, last_params):
     lp = last_params
 
-    #Dirty flag checks — determine which stages need recomputing
+    #Dirty flag checks: Determine which stages need recomputing
     compress_dirty = (
         "warped" not in cache
         or params["vertical_compression"] != lp.get("vertical_compression")
@@ -252,7 +254,7 @@ def _build_preview(params, base_flipped, prev_w, prev_img, prev_y, cache, last_p
         or params["wave_freq"] != lp.get("wave_freq")
     )
     blur_dirty = ripple_dirty or params["blur_size"] != lp.get("blur_size")
-    # Fade is always cheap — always recomputed, never cached
+    # Fade is always cheap so we can always recompute, never cached
 
     #Recompute from earliest dirty stage downwards
     if compress_dirty:
@@ -272,14 +274,14 @@ def _build_preview(params, base_flipped, prev_w, prev_img, prev_y, cache, last_p
 
     r = cache["blurred"]
 
-    #Fade always runs — too cheap to bother caching
+    #Fade always runs, ignored from caching
     r = apply_fade(r.copy(), ch, params["darken"], params["fade_min"])
 
     return composite(prev_img, r, prev_y, ch, prev_w)
 
 
 """
-Function: Phase 2 — Live trackbar parameter tuning on a downscaled preview image
+Function: Phase 2 - Live trackbar parameter tuning on a downscaled preview image
 - Why: Lets the user interactively adjust all 7 reflection parameters and see results instantly
 - Downscaling to PREVIEW_W keeps the preview responsive regardless of source image resolution
 - ENTER locks the parameters and triggers the full-resolution render
@@ -294,7 +296,7 @@ def tune_parameters(img, reflection_start_y, defaults):
     """
     h, w = img.shape[:2]
 
-    # Downscale preview source
+    #Downscale preview source
     prev_scale   = min(PREVIEW_W / w, 1.0)
     prev_w       = int(w * prev_scale)
     prev_h       = int(h * prev_scale)
@@ -302,7 +304,7 @@ def tune_parameters(img, reflection_start_y, defaults):
     prev_y       = max(1, int(reflection_start_y * prev_scale))
     base_flipped = cv2.flip(prev_img[:prev_y], 0)
 
-    # Colour palette
+    #Color palette
     BG     = ( 20,  20,  20)
     PANEL  = ( 30,  30,  30)
     ACCENT = ( 55, 180, 255)
@@ -311,14 +313,14 @@ def tune_parameters(img, reflection_start_y, defaults):
     WHITE  = (255, 255, 255)
     GREEN  = ( 80, 200, 120)
 
-    # Layout constants
+    #Layout constants
     PANEL_W  = 290
     PAD      = 20
     HEADER_H = 56
     ITEM_H   = 56
     FOOTER_H = 72
 
-    # Slider definitions: (display label, param key, int_min, int_max, int_default, divisor)
+    #Slider definitions: (display label, param key, int_min, int_max, int_default, divisor)
     BARS = [
         ("Compress",    "vertical_compression", 50, 100, int(defaults["vertical_compression"] * 100), 100),
         ("Perspective", "perspective_shrink",    0,  30, int(defaults["perspective_shrink"]   * 100), 100),
@@ -332,7 +334,7 @@ def tune_parameters(img, reflection_start_y, defaults):
     values   = {key: default for _, key, _, _, default, _ in BARS}
     dragging = [None]
 
-    # Slider geometry helpers
+    #Slider geometry helpers
     def track_x_range():
         return PAD + 4, PANEL_W - PAD - 4
 
@@ -348,14 +350,14 @@ def tune_parameters(img, reflection_start_y, defaults):
         t = float(np.clip((x - x1) / max(x2 - x1, 1), 0.0, 1.0))
         return int(round(lo + t * (hi - lo)))
 
-    # Mouse callback for dragging sliders
+    #Mouse callback for dragging sliders
     def mouse_cb(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             for i, (_, key, lo, hi, _, _) in enumerate(BARS):
                 ty = track_y(i)
                 hx = val_to_x(values[key], lo, hi)
                 x1, x2 = track_x_range()
-                if (abs(x - hx) < 14 and abs(y - ty) < 14) or                    (x1 <= x <= x2 and abs(y - ty) < 10):
+                if (abs(x - hx) < 14 and abs(y - ty) < 14) or (x1 <= x <= x2 and abs(y - ty) < 10):
                     dragging[0] = i
                     values[key] = x_to_val(x, lo, hi)
                     break
@@ -367,11 +369,11 @@ def tune_parameters(img, reflection_start_y, defaults):
         elif event == cv2.EVENT_LBUTTONUP:
             dragging[0] = None
 
-    # Draw left control panel onto a numpy array
+    #Draw left control panel onto a numpy array
     def draw_panel(canvas_h):
         panel = np.full((canvas_h, PANEL_W, 3), PANEL, dtype=np.uint8)
 
-        # Header
+        #Header
         cv2.putText(panel, "Parameters", (PAD, 34),
                     cv2.FONT_HERSHEY_DUPLEX, 0.62, WHITE, 1, cv2.LINE_AA)
         cv2.line(panel, (PAD, 46), (PANEL_W - PAD, 46), (50, 50, 50), 1)
@@ -383,7 +385,7 @@ def tune_parameters(img, reflection_start_y, defaults):
             hx  = val_to_x(val, lo, hi)
             x1, x2 = track_x_range()
 
-            # Label left, value right
+            #Label left, value right
             cv2.putText(panel, label, (PAD, ly),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.40, SUB, 1, cv2.LINE_AA)
             disp = f"{val / div:.2f}" if div > 1 else str(val)
@@ -391,17 +393,17 @@ def tune_parameters(img, reflection_start_y, defaults):
             cv2.putText(panel, disp, (PANEL_W - PAD - tw - 2, ly),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.40, ACCENT, 1, cv2.LINE_AA)
 
-            # Track: grey bg then filled accent up to handle
+            #Track: grey bg then filled accent up to handle
             cv2.line(panel, (x1, ty), (x2, ty), TRACK, 3, cv2.LINE_AA)
             if hx > x1:
                 cv2.line(panel, (x1, ty), (hx, ty), ACCENT, 3, cv2.LINE_AA)
 
-            # Handle circle
+            #Handle circle
             active = dragging[0] == i
             cv2.circle(panel, (hx, ty), 7, WHITE if active else ACCENT, -1, cv2.LINE_AA)
             cv2.circle(panel, (hx, ty), 7, (160, 160, 160) if active else ACCENT, 1, cv2.LINE_AA)
 
-        # Footer hints
+        #Footer hints
         fy = HEADER_H + len(BARS) * ITEM_H + 16
         cv2.line(panel, (PAD, fy), (PANEL_W - PAD, fy), (50, 50, 50), 1)
         cv2.putText(panel, "ENTER  render & save", (PAD, fy + 20),
@@ -415,11 +417,11 @@ def tune_parameters(img, reflection_start_y, defaults):
         out["blur_size"] = int(values["blur_size"])
         return out
 
-    # Window setup
+    #Window setup
     panel_h = HEADER_H + len(BARS) * ITEM_H + FOOTER_H
     win_h   = max(panel_h, prev_h)
     win_w   = PANEL_W + prev_w + 40
-    WIN = "Step 2 — Tune parameters | ENTER = render & save | ESC = cancel"
+    WIN = "Step 2 - Tune parameters | ENTER = render & save | ESC = cancel"
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WIN, win_w, win_h)
     cv2.setMouseCallback(WIN, mouse_cb)
@@ -435,7 +437,7 @@ def tune_parameters(img, reflection_start_y, defaults):
                                      cache, last_params)
             last_params = params.copy()
 
-        # Read actual window size for dynamic scaling
+        #Read actual window size for dynamic scaling
         try:
             wr    = cv2.getWindowImageRect(WIN)
             cur_w = max(wr[2], PANEL_W + 10)
@@ -443,18 +445,18 @@ def tune_parameters(img, reflection_start_y, defaults):
         except Exception:
             cur_w, cur_h = win_w, win_h
 
-        # Build full canvas
+        #Build full canvas
         canvas = np.full((cur_h, cur_w, 3), BG, dtype=np.uint8)
 
-        # Left panel
+        #Left panel
         panel = draw_panel(cur_h)
         ph    = min(panel.shape[0], cur_h)
         canvas[:ph, :PANEL_W] = panel[:ph]
 
-        # Vertical divider line
+        #Vertical divider line
         cv2.line(canvas, (PANEL_W, 0), (PANEL_W, cur_h), (45, 45, 45), 1)
 
-        # Right side: preview centred in available space
+        #Right side: preview centred in available space
         if preview is not None:
             avail_w = cur_w - PANEL_W - 1
             avail_h = cur_h
@@ -478,10 +480,10 @@ def tune_parameters(img, reflection_start_y, defaults):
 
         if prop < 1:
             cv2.destroyAllWindows()
-            print("Window closed — exiting.")
+            print("Window closed: Exiting.")
             sys.exit(0)
 
-        if key in (13, 10): #ENTER — lock params and trigger full-res render
+        if key in (13, 10): #ENTER - lock params and trigger full-res render
             cv2.destroyAllWindows()
             return params
         elif key == 27: #ESC TO EXIT
@@ -492,7 +494,7 @@ def tune_parameters(img, reflection_start_y, defaults):
 
 
 """
-Function: Phase 3 — Render the final composite at full resolution and save to disk
+Function: Phase 3 - Render the final composite at full resolution and save to disk
 - Why: Preview runs on a downscaled image for speed; this step produces the actual output
 - Only runs once after the user confirms parameters in Phase 2
 """
